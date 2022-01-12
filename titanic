@@ -1,0 +1,490 @@
+// [1. 사전 준비]
+//1. 데이터 로딩
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+drive_patch = "/gdrive/My Drive/portfolio/데이콘/"
+train = pd.read_csv(drive_patch + "titanic/train.csv")
+test = pd.read_csv(drive_patch + "titanic/test.csv")
+submission = pd.read_csv(drive_patch + "titanic/submission.csv")
+print(train.shape, test.shape, submission.shape)
+
+//2. 데이터 구조
+train.head()
+test.head()
+submission.head()
+train.describe(include ='all')
+
+//3. 결측값 확인
+train.drop(labels =['tempt','int_date'], axis=1)
+
+import missingno as msno  
+msno.bar(train, figsize=(10,5), color=(0.7, 0.2, 0.2))   #결측값을 막대그래프로 그림
+plt.show()
+
+msno.matrix(test, figsize=(10, 5), color=(0.7, 0.2, 0.2))   #결측값이 어느 위치(행 인덱스 기준)에 있는지 확인할 수 있음 -> 결측값이 분포하는 경향 파악 가능.
+plt.show()
+
+//4. 상관관계 분석
+plt.figure(figsize=(8,8))
+sns.set(font_scale=0.8)
+sns.heatmap(train.corr(), annot=True, cbar=True)
+plt.show()
+
+#아래 결과에서 survived는 pclass, fare와 상관관계를 가지는 것을 볼 수 있다. 
+#Pclass와는 음의 상관관계를 가지므로 클래스 등급이 낮을수록(1등급) 생존 확률이 높다는 것을 알 수 있다. 
+#fare와는 양의 상관관계를 가지므로 요금이 높을수록 생존확률이 높다는 것을 볼 수 있다.
+#결국 둘 다 같은 결과를 보여주는 것을 알 수 있다. 
+
+#passengerID, sibSp 는 사실상 거의 상관관계를 가지지 않는다고 볼 수 있겠다. 
+
+// [2. 베이스라인 모델]
+//1. 데이터 결합
+train['TrainSplit']='Train'
+test['TrainSplit']='Test'
+data = pd.concat([train, test], axis=0)
+print(data.shape)
+
+//2. 데이터 전처리
+#숫자형 피쳐 추출
+data_num = data.loc[:,['Pclass','Age','SibSp','Parch','Fare','Survived']]
+
+#결측값 대체
+data_num['Age']=data_num['Age'].fillna(data_num['Age'].mean())
+data_num['Fare']=data_num['Fare'].fillna(data_num['Fare'].mode()[0])
+
+#학습용 데이터와 예측 대상인 테스트 데이터 구분
+selected_features = ['Pclass','Age','SibSp','Parch','Fare']
+
+x_train = data_num.loc[data['TrainSplit']=='Train', selected_features]
+y_train = data_num.loc[data['TrainSplit']=='Train', 'Survived']
+
+x_test = data_num.loc[data['TrainSplit']=='Test', selected_features]
+
+print("train 데이터셋의 크기: ",x_train.shape, y_train.shape)
+print("test 데이터셋의 크기:", x_test.shape)
+
+//3. 모델 학습 및 검증
+#훈련-검증 데이터 분할
+from sklearn.model_selection import train_test_split
+x_tr, x_val, y_tr, y_val = train_test_split(x_train, y_train, test_size=0.2, shuffle=True, random_state=20)
+
+#로지스틱 회귀 모델
+from sklearn.linear_model import LogisticRegression
+lr_model= LogisticRegression()
+lr_model.fit(x_tr, y_tr)
+y_val_pred = lr_model.predict(x_val)
+
+#confusion matrix
+from sklearn.metrics import confusion_matrix
+sns.heatmap(confusion_matrix(y_val, y_val_pred), annot=True, cbar=False, square=True)
+plt.show()
+
+
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import f1_score, roc_auc_score
+
+print("Accuracy: %.4f"%accuracy_score(y_val, y_val_pred))
+print("Precision: %.4f"%precision_score(y_val, y_val_pred))
+print("Recall: %.4f"%recall_score(y_val, y_val_pred))
+print("F1: %.4f"%f1_score(y_val, y_val_pred))
+print("AUC: %.4f"%roc_auc_score(y_val, y_val_pred))
+
+# auc-> 데이콘에서 사용하는 평가지표. 최대값=1. 예측력이 좋은 모델일수록 1에 가까운 값을 가짐.
+
+//4. 모델 예측
+#test 데이터에 대한 예측값 정리
+y_test_pred = lr_model.predict(x_test)
+
+#제출 양식에 맞게 정리
+submission['Survived'] = y_test_pred.astype(int)
+
+#제출 파일 저장
+submission_filepath = drive_patch+'baseline_num_lr_submission_001.csv'
+submission.to_csv(submission_filepath, index=False)
+submission.head()
+
+// 피쳐 엔지니어링 
+//1. survived
+#survived 열 데이터(타깃 레이블) 분포 확인
+train['Survived'].value_counts(dropna=False)
+
+sns.countplot(data=data[data['TrainSplit']=='Train'], x= 'Survived')      #train 데이터만 추출 
+plt.show()     
+
+//2. Pclass
+sns.countplot(data=data[data['TrainSplit']=='Train'], x='Pclass', hue='Survived')
+
+sns.barplot(x='Pclass', y='Fare', data=data[data['TrainSplit']=='Train'],
+            hue='Survived', estimator=np.median)
+plt.show()
+
+//3. sex
+#histplot -dodge옵션 : hue옵션의 데이터를 기준으로 막대 그래프를 서로 겹치지 않게 수평으로 펼쳐서 분리 표시
+sns.histplot(x='Sex', data=data[data['TrainSplit']=='Train'],
+            hue = 'Survived', multiple='dodge')
+plt.show()
+
+#histplot -stack옵션 
+sns.histplot(x='Sex', data=data[data['TrainSplit']=='Train'],
+            hue = 'Survived', multiple='stack')
+plt.show()
+
+#histplot -fill옵션 
+sns.histplot(x='Sex', data=data[data['TrainSplit']=='Train'],
+            hue = 'Survived', multiple='fill')
+plt.show()
+
+#레이블 인코딩 (female:0, male:1)
+data.loc[data['Sex']=='female', 'Sex'] =0
+data.loc[data['Sex']=='male','Sex'] =1
+data['Sex'] =data['Sex'].astype(int)
+
+#성별 분포 확인
+data['Sex'].value_counts(dropna=False)
+
+//4. name
+data['Name'].unique()
+
+title_name = data['Name'].str.split(",", expand=True)[1]
+title_name
+
+# expand= True, return DataFrame/MultiIndex expanding dimensionality.
+# expand= False, return Series/Index, containing lists of strings.
+
+title = title_name.str.split(".", expand=True)[0]
+title.value_counts(dropna=False)
+
+title = title.replace(['Ms'],'Miss')
+title = title.replace(['Mlle','the Countess','Lady','Don','Dona','Mme','Sir','Jonkheer'],'Noble')
+title = title.replace(['Col','Major','Capt'],'Officer')
+title = title.replace(['Dr','Rev'],'Priest')
+
+data['Title'] = np.array(title)
+data['Title'].value_counts(dropna= False)
+
+
+#승객 나이와 생존 여부와의 관계
+sns.violinplot(x='Title', y='Age', hue='Survived',
+               data=data, split=True)
+plt.show()
+
+
+data= data.drop(['Name'], axis=1)  #axis=1 로 삭제 -> 열 삭제
+data.columns
+
+//5. age
+for title in data['Title'].unique():
+  print("%s 결측값 개수: "%title, data.loc[data['Title']==title,'Age'].isnull().sum())
+  age_med = data.loc[data['Title']==title,'Age'].median()
+  data.loc[data['Title']==title,'Age'] =data.loc[data['Title']==title,'Age'].fillna(age_med)    #결측값 -> 그룹별 나이 중간값
+
+print("\n")
+print("Age 열의 결측값 개수: ", data['Age'].isnull().sum())
+
+#age 분포
+sns.displot(x='Age', kind='hist', hue='Survived',
+            data=data[data['TrainSplit']=='Train'])
+plt.show()
+
+#binning- 구간 나누기
+bins = [0,4,8,12,16,32,36,48,56,64,100]
+labels = ['Infant','Child1','Child2','Youth1','Youth2','Adult1','Adult2','Middle Aged','Senior','Elderly']
+data['AgeBin'] = pd.cut(data['Age'], bins=bins, labels=labels)
+
+#age_bin 에 따른 생존률 비교
+sns.countplot(x='AgeBin', hue= 'Survived', data=data[data['TrainSplit']=='Train'])
+
+plt.xticks(rotation=45)
+plt.show()
+
+//6. sibsp
+sns.boxplot(x='SibSp', y='Age', hue='Survived',
+            data=data[data['TrainSplit']=='Train'])
+plt.show()
+
+//7. parch
+sns.boxplot(x='Parch', y='Age', hue='Survived',
+            data=data[data['TrainSplit']=='Train'])    #함께 탑승한 부모 또는 자식 수 -> sibsp열+parch열 하면 함께 탑승한 모든 가족 수 계산 가능
+plt.show()
+
+#가족 구성원 수
+data['FamilySize'] = data['SibSp']+data['Parch']+1
+
+#가족 구성원 수와 생존율 관계
+sns.barplot(x='FamilySize', y='Survived', hue='Pclass', estimator=np.mean,  #seaborn은 원하는 집계를 매우 쉽고 간편하게 해낼 수 있음 -> estimator를 지정하면 된다.
+            data=data[data['TrainSplit']=='Train'])
+plt.show()
+
+//9. fare
+#결측값 확인
+data.loc[data['Fare'].isnull(),:]
+
+# 3등석 평균 요금값을 가지고 결측값 대체
+p3_fare_mean = data.loc[data['Pclass']==3, 'Fare'].mean()
+print(p3_fare_mean)
+
+data['Fare'] =data['Fare'].fillna(p3_fare_mean)
+data.loc[data['PassengerId']==1044, :'Fare']
+
+#Fare 분포
+sns.displot(x='Fare', kind='kde', hue= 'Survived',
+            data=data[data['TrainSplit']=='Train'])
+plt.show()
+
+#log 변환
+data['Farelog'] =np.log1p(data['Fare'])
+
+#farelog의 분포
+sns.displot(x='Farelog', kind='hist', hue='Survived',
+            data=data[data['TrainSplit']=='Train'])
+plt.show()
+
+#객실 등급 별 객실 요금 분포와 생존율
+sns.stripplot(x='Pclass', y='Farelog', hue='Survived',
+            data=data[data['TrainSplit']=='Train'])
+plt.show()
+
+//9. embarked
+data.loc[data['Embarked'].isnull(),:]
+
+sns.countplot(data=data[data['TrainSplit']=='Train'], x='Embarked')
+
+#탑승장소 확인할 방법 뚜렷하지 않음 -> 가장 탑승자가 많은 S값으로 채움
+#최빈값으로 결측값 처리
+
+print('Embarked 열의 최빈값: ', data['Embarked'].mode()[0])
+data['Embarked']=data['Embarked'].fillna(data['Embarked'].mode()[0])
+data['Embarked'].value_counts(dropna=False)
+
+#탑승 항구별 생존율 비교
+sns.catplot(x='Embarked', y='Survived', kind='point',
+              data=data[data['TrainSplit']=='Train'])
+
+plt.show()
+
+//10. cabin
+data['Cabin'].unique()
+
+data['Cabin'].str.slice(0,1).value_counts(dropna= False)
+
+#결측값 'U'로 대체
+data['Cabin']= data['Cabin'].str.slice(0,1)
+data['Cabin'] = data['Cabin'].fillna('U')
+
+#cabin 구역별 생존율 비교
+sns.catplot(x='Cabin', y='Survived', kind='bar',  
+            data=data[data['TrainSplit']=='Train'])             #catplot category분류 시각화용
+plt.show()    
+
+//11. ticket
+data['Ticket'].value_counts(dropna=False)
+
+data['Ticket'] =data['Ticket'].str.replace(".","").str.replace("/","")
+data['Ticket'] =data['Ticket'].str.strip().str.split(' ').str[0]          #strip -> 문자열 앞 뒤 공백 제거
+data['Ticket'].value_counts(dropna=False)
+
+#문자열이 숫자인 경우, 'NUM으로 대체
+data.loc[data['Ticket'].str.isdigit(), 'Ticket'] = 'NUM'      #isdigit() -> 숫자로만 이루어져있으면 True 반환
+data['Ticket'].value_counts(dropna=False)[:10]
+
+#Ticket 번호별 생존율 비교
+sns.catplot(x='Ticket', y='Survived', kind='bar',
+              data=data[data['TrainSplit']=='Train'])
+plt.xticks(rotation=90)
+plt.show()
+
+// [3. 데이터 전처리]
+// 레이블 인코딩
+
+#label encoding
+from sklearn.preprocessing import LabelEncoder
+for col in ['Title', 'AgeBin']:
+    encoder = LabelEncoder()
+    data[col] = encoder.fit_transform(data[col])
+
+data.loc[:, ['Title', 'AgeBin']].head()
+
+//원핫 인코딩
+# 원핫 인코딩 -> 판다스 get_dummies 함수 사용.
+# columns 속성에 원핫 인코딩할 열 이름 입력 -> prefix 옵션은 분할하여 생성되는 열 이름의 앞부분을 지정.
+# drop_first = true -> 첫번쨰 열 삭제--- 하나의 열이 없어도 원래 범주를 구분하는데 충분
+# 새로 만들어지는 열 이름: prefix+"_"+범주데이터
+
+# 범주형 변수로 변환 및 원핫 인코딩
+onehot_prefix =[]
+for col in ['Embarked','Cabin','Ticket']:
+  data[col] = data[col].astype('category')
+  data= pd.get_dummies(data, columns=[col], prefix=col[:3], drop_first=True)     #prefix=col[:3] -> 열 이름 3글자
+  onehot_prefix.append(col[:3])
+
+data.loc[:,[col for col in data.columns if col[:3] in onehot_prefix]].head()
+
+//피쳐 스케일링
+# 사이킷런 MinMaxScaler 을 사용해 모델학습에 사용할 피쳐 스케일을 0~1 범위로 정규화 처리
+# 피처 스케일링
+from sklearn.preprocessing import MinMaxScaler
+scaler = MinMaxScaler()
+
+#스케일링 처리할 피처 선택 -TrainSplit 등 일부 열 제외
+scaled_cols = [col for col in data.loc[:, 'Pclass':].columns if col!='TrainSplit']
+
+data_scaled = data.loc[:, scaled_cols]
+data_scaled = scaler.fit_transform(data_scaled)
+
+# 스케일링 변환된 값을 데이터프레임에 반영
+data.loc[:,scaled_cols]=data_scaled[:, :]
+data.head()
+
+// [4. 모델학습]
+//피쳐 선택
+data.columns
+
+# 모델학습에 사용할 피쳐 선택 -> 54개
+selected_features = ['Pclass', 'Sex', 'SibSp', 'Parch',
+                     'Title', 'AgeBin', 'FamilySize', 'Farelog',
+                     'Emb_Q', 'Emb_S', 'Cab_B', 'Cab_C', 'Cab_D', 'Cab_E', 'Cab_F', 'Cab_G',
+                     'Cab_T', 'Cab_U', 'Tic_A4', 'Tic_A5', 'Tic_AQ3', 'Tic_AQ4', 'Tic_AS',
+                     'Tic_C', 'Tic_CA', 'Tic_CASOTON', 'Tic_FC', 'Tic_FCC', 'Tic_Fa',
+                     'Tic_LINE', 'Tic_LP', 'Tic_NUM', 'Tic_PC', 'Tic_PP', 'Tic_PPP',
+                     'Tic_SC', 'Tic_SCA3', 'Tic_SCA4', 'Tic_SCAH', 'Tic_SCOW', 'Tic_SCPARIS',
+                     'Tic_SCParis', 'Tic_SOC', 'Tic_SOP', 'Tic_SOPP', 'Tic_SOTONO2',
+                     'Tic_SOTONOQ', 'Tic_SP', 'Tic_STONO', 'Tic_STONO2', 'Tic_STONOQ',
+                     'Tic_SWPP', 'Tic_WC', 'Tic_WEP']
+len(selected_features)                    
+
+# 학습용 데이터와 예측 대상인 테스트 데이터 구분
+# TrainSplit 열 데이터를 기준으로 필터링.
+y_train =data.loc[data['TrainSplit']=='Train', 'Survived']
+x_train =data.loc[data['TrainSplit']=='Train', selected_features]
+x_test = data.loc[data['TrainSplit']=='Test', selected_features]
+
+print("Train 데이터셋 크기:", x_train.shape, y_train.shape)
+print("Test 데이터셋 크기:", x_test.shape)
+
+# 훈련-검증 데이터 분할
+from sklearn.model_selection import train_test_split
+
+x_tr, x_val,y_tr, y_val = train_test_split(x_train, y_train, test_size=0.2,
+                                            shuffle=True, random_state=20)
+
+print("훈련 데이터 크기", x_tr.shape, y_tr.shape)
+print("검증 데이터 크기", x_val.shape,y_val.shape)
+
+lr_model = LogisticRegression()
+lr_model.fit(x_tr, y_tr)
+
+y_tr_pred = lr_model.predict(x_tr)
+print("훈련 Accuracy: %.4f"%accuracy_score(y_tr, y_tr_pred))
+print("훈련 AUC: %.4f" % roc_auc_score(y_tr, y_tr_pred))
+
+y_val_pred = lr_model.predict(x_val)
+print("검증 Accuracy: %.4f"%accuracy_score(y_val, y_val_pred))
+print("검증 AUC: %.4f" % roc_auc_score(y_val, y_val_pred))
+
+# test 데이터 예측 및 제출 파일 저장
+y_test_pred = lr_model.predict(x_test)
+submission['Survived']=y_test_pred.astype(int)
+submission_filepath = drive_patch + 'baseline_lr_submission_001.csv'
+submission.to_csv(submission_filepath,index=False)
+
+#랜덤 포레스트
+from sklearn.ensemble import RandomForestClassifier
+
+rf_model = RandomForestClassifier(random_state=2020)
+
+#cross_val_score 함수
+from sklearn.model_selection import cross_val_score
+auc_scores = cross_val_score(lr_model,x_train, y_train, cv=5, scoring='roc_auc')
+
+print("개별 Fold의 AUC점수: ", np.round(auc_scores,4))
+print("평균 AUC점수: ", np.round(np.mean(auc_scores),4))
+
+rf_model.fit(x_train, y_train)
+y_test_pred = rf_model.predict(x_test)
+submission['Survived']=y_test_pred.astype(int)
+submission_filepath = drive_patch + 'baseline_rf_submission_001.csv'
+submission.to_csv(submission_filepath,index=False)
+
+
+//피쳐 중요도
+#트리기반 알고리즘 사용 -> 트리를 나누는 기준이 되는 피처의 중요도를 측정할 수 있음
+#tree 계열 알고리즘의 feature importance 그래프
+def plot_importance(model, features):                
+  importances = model.feature_importances_
+  indices = np.argsort(importances)
+  feature_names = [features[i] for i in indices]
+  feature_imp = importances[indices]
+
+  plt.figure(figsize=(10,12))
+  plt.title('Feature Importances')
+  plt.barh(range(len(indices)), feature_imp, align='center')
+  plt.yticks(range(len(indices)),feature_names)
+  plt.xlabel("Relative Importance")
+  
+  print("feature: ", list(reversed(feature_names)))
+  print("Importance: ",list(reversed(feature_imp)))
+
+  return list(reversed(feature_names)), list(reversed(feature_imp))
+
+
+imp_features, imp_scores = plot_importance(rf_model, selected_features)
+
+
+# 상위 10개 피쳐만 선택
+selected_features = imp_features[:10]
+y_train = data.loc[data['TrainSplit']=='Train', 'Survived']
+x_train = data.loc[data['TrainSplit']=='Train', selected_features]
+x_test = data.loc[data['TrainSplit']=='Test', selected_features]
+
+print("Train 데이터셋의 크기: ", x_train.shape, y_train.shape)
+print("Test 데이터셋의 크기: ", x_test.shape)
+
+
+#랜덤 포레스트
+rf_model = RandomForestClassifier(random_state=2020)
+auc_scores = cross_val_score(rf_model,x_train, y_train, cv=5, scoring='roc_auc')
+
+print("개별 Fold의 AUC 점수:", np.round(auc_scores,4))
+print("평균 AUC 점수:",np.round(np.mean(auc_scores),4))
+
+rf_model.fit(x_train, y_train)
+y_test_pred = rf_model.predict(x_test)
+
+submission['Survived'] =y_test_pred.astype(int)
+submission_filepath = drive_patch + 'baseline_rf_submission_002.csv'
+submission.to_csv(submission_filepath,index=False)
+
+
+#XGBoost
+from xgboost import XGBClassifier
+xgb_model = XGBClassifier(max_depth =3, random_state=2020)
+auc_scores = cross_val_score(xgb_model, x_train, y_train, cv=3, scoring = 'roc_auc')
+
+print("개별 Fold의 AUC 점수:", np.round(auc_scores,4))
+print("평균 AUC 점수:",np.round(np.mean(auc_scores),4))
+
+xgb_model.fit(x_train, y_train)
+y_test_pred = xgb_model.predict(x_test)
+
+submission['Survived'] =y_test_pred.astype(int)
+submission_filepath = drive_patch + 'baseline_xgb_submission_001.csv'
+submission.to_csv(submission_filepath,index=False)
+
+
+//분류 확률값
+#확률값 예측
+y_xgb_proba = xgb_model.predict_proba(x_test)[:,1]
+y_rf_proba = rf_model.predict_proba(x_test)[:,1]
+
+#앙상블 기법
+y_proba = (y_xgb_proba +y_rf_proba)/2
+
+submission['Survived'] =y_test_pred.astype(int)
+submission_filepath = drive_patch + 'baseline_proba_submission_001.csv'
+submission.to_csv(submission_filepath,index=False)
+
+
+
