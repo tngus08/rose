@@ -1,0 +1,284 @@
+!pip install yfinance
+
+!sudo apt-get install -y fonts-nanum
+!sudo fc-cache -fv
+!rm ~/.cache/matplotlib -rf
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import yfinance as yf
+
+
+samsung_df = yf.download('005930.KS',
+                         start = '2020-12-01',
+                         end = '2021-12-01',
+                         progress=False)
+
+#종가로만 분석
+samsung_df = samsung_df[["Close"]]
+
+samsung_df = samsung_df.reset_index()
+
+samsung_df.columns = ['day', 'price']
+
+samsung_df['day'] = pd.to_datetime(samsung_df['day'])
+
+samsung_df.index = samsung_df['day']
+samsung_df.set_index('day', inplace=True)
+
+//1. 탐색
+len(samsung_df)
+
+#총 248개 데이터 중 240개를 train데이터로 설정
+samsung_train = samsung_df[:240]
+samsung_train
+
+#총 248개 데이터 중 8개를 test데이터로 설정
+samsung_test = samsung_df[240:]
+samsung_test
+
+samsung_df.describe()
+
+import platform
+from matplotlib import font_manager, rc
+plt.rcParams['axes.unicode_minus']=False #글씨 깨짐 방지
+
+rc('font', family='NanumBarunGothic') 
+
+samsung_df.sort_values(by=['price'], axis=0,ascending=False)
+
+
+#시각화
+fig, ax =plt.subplots(figsize = (15,8))
+samsung_df.plot(ax=ax)
+
+
+#2021년 12월
+ax.annotate('', xy=('2020-12-04',71500.0),xytext = ('2020-12-15',70000.0),
+            arrowprops = dict(arrowstyle="->", connectionstyle="arc3, rad=0.2"))
+plt.text('2020-12-15',67000.0, "7만대 진입 \n- 날짜: 2020-12-04 \n-종가: 71,500", fontsize=13)
+
+
+ax.annotate('', xy=('2020-12-04',71500.0),xytext = ('2020-12-15',70000.0),
+            arrowprops = dict(arrowstyle="->", connectionstyle="arc3, rad=0.2"))
+plt.text('2020-12-15',67000.0, "7만대 진입 \n- 날짜: 2020-12-04 \n-종가: 71,500", fontsize=13)
+
+#삼성전자 주가 역대 최고 2021-01-11
+#코로나4단계 첫시행 2021-07-12
+#위드코로나 시작 2021-11-01
+#국내 오미크론 첫 환자 발생 2021-12-01
+
+
+
+plt.title("삼성전자 주가 변화")
+plt.show()
+
+
+//2. 예측: 파이썬 라이브러리를 활용한 시세
+
+from statsmodels.tsa.arima_model import ARIMA
+import statsmodels.api as sm
+
+#(AR=2, 차분=1, MA=2) 파라미터로 ARIMA 모델 학습
+model = ARIMA(samsung_train.price.values, order=(2,1,2))
+model_fit = model.fit(trend='c', full_output=True, disp=True)
+print(model_fit.summary())
+
+fig = model_fit.plot_predict()
+
+residuals = pd.DataFrame(model_fit.resid)
+residuals.plot(title = "실제값과 예측값의 잔차")
+
+#향후 8일 후의 가격을 예측하여 pred_y로 저장
+forecast_data = model_fit.forecast(steps=8)
+forecast_data
+
+#마지막 8일의 예측데이터
+pred_arima_y = forecast_data[0].tolist()
+#실제 8일 데이터
+test_y = samsung_test.price.values
+
+#마지막 8일의 예측 데이터 최소값
+pred_y_lower = []
+#마지막 8일의 예측 데이터 최대값
+pred_y_upper = []
+
+for lower_upper in forecast_data[2]:
+  lower = lower_upper[0]
+  upper = lower_upper[1]
+  pred_y_lower.append(lower)
+  pred_y_upper.append(upper)
+
+plt.figure(figsize=(15,10))
+
+#모델이 예측한 가격 그래프
+plt.plot(pred_arima_y, color = 'gold')
+
+#모델이 예측한 최저 가격 그래프
+plt.plot(pred_y_lower, color = 'red')
+
+#모델이 예측한 최고 가격 그래프
+plt.plot(pred_y_upper, color = 'blue')
+
+#실제 가격 그래프
+plt.plot(test_y, color='green')
+
+plt.legend(['예측값', '최저값','최고값','실제값'])
+plt.title("값 비교")
+plt.show()
+
+
+//Model 2: Facebook Prophet
+
+from fbprophet import Prophet
+
+samsung_df = samsung_df.reset_index()
+samsung_df.columns = ['ds','y']
+
+samsung_train = samsung_df[:240]
+samsung_test = samsung_df[240:]
+
+
+prophet = Prophet(seasonality_mode='multiplicative',
+                 yearly_seasonality= True,
+                 weekly_seasonality= True,
+                 daily_seasonality= True,
+                 changepoint_prior_scale= 0.5)
+
+prophet.fit(samsung_train)
+
+future_data = prophet.make_future_dataframe(periods = 8, freq = 'd')
+forecast_data = prophet.predict(future_data)
+forecast_data[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(5)
+
+### yhat       : 예측값
+### yhat_lower : 하한선
+### yhat_upper : 상한선
+
+forecast_data.head()
+
+fig1 = prophet.plot(forecast_data)
+
+fig2 = prophet.plot_components(forecast_data)
+
+#test셋 평가
+
+plt.figure(figsize = (15,10))
+
+#마지막 8일의 예측 데이터
+pred_fbprophet_y = forecast_data.yhat.values[-8:]
+
+#마지막 8일의 실제 데이터
+test_y = samsung_test.y.values
+
+#마지막 8일의 예측 데이터 최솟값
+pred_y_lower = forecast_data.yhat_lower.values[-8:]
+#마지막 8일의 예측 데이터 최댓값
+pred_y_upper = forecast_data.yhat_upper.values[-8:]
+
+#모델이 예측한 가격 그래프
+plt.plot(pred_fbprophet_y, color='gold')
+#모델이 예측한 최저 가격 그래프
+plt.plot(pred_y_lower, color='red')
+#모델이 예측한 최고 가격 그래프
+plt.plot(pred_y_upper, color='blue')
+
+#실제 가격 그래프
+plt.plot(test_y, color='green')
+
+plt.legend(['예측값','최저값','최댓값','실제값'])
+plt.title("값 비교")
+
+
+//step3 활용 : 더 나은 결과를 위한 방법
+
+#상한가 설정
+samsung_train['cap'] = 90000
+
+#상한가 적용을 위한 파라미터 설정
+prophet = Prophet(seasonality_mode='multiplicative',
+                 yearly_seasonality= True,
+                 weekly_seasonality= True,
+                 daily_seasonality= True,
+                 changepoint_prior_scale= 0.5)
+
+prophet.fit(samsung_train)
+
+#8일 예측
+future_data = prophet.make_future_dataframe(periods=8, freq='d')
+
+#상한가 설정
+future_data['cap'] = 90000
+forecast_data = prophet.predict(future_data)
+
+fig = prophet.plot(forecast_data)
+
+//이상치 제거
+
+samsung_train.loc[samsung_train['y']>90000, 'y'] = None
+
+#prophet 모델 학습
+prophet = Prophet(seasonality_mode='multiplicative',
+                 yearly_seasonality= True,
+                 weekly_seasonality= True,
+                 daily_seasonality= True,
+                 changepoint_prior_scale= 0.5)
+
+prophet.fit(samsung_train)
+
+#8일 예측
+future_data = prophet.make_future_dataframe(periods=8, freq='d')
+
+forecast_data = prophet.predict(future_data)
+
+fig = prophet.plot(forecast_data)
+
+
+pred_fbprophet_y_1 = forecast_data.yhat.values[-8:]
+
+//step4: model 평가
+# RMSE
+df = pd.DataFrame({'ARIMA 예측값': pred_arima_y,
+                  'FBprophet 예측값': pred_fbprophet_y,
+                  'FBprophet 이상치 제거 후 예측값': pred_fbprophet_y_1,
+                  '실제값': test_y})
+
+df
+
+#ARIMA의 예측값이 가장 좋은 것을 볼 수 있다
+
+
+from sklearn.metrics import mean_squared_error, r2_score
+from math import sqrt
+
+plt.figure(figsize=(15,10))
+
+#arima 모델의 rmse
+rmse_arima = sqrt(mean_squared_error(pred_arima_y, test_y))
+#fbprophet 모델의 rmse
+rmse_fbprophet = sqrt(mean_squared_error(pred_fbprophet_y, test_y))
+#w전처리 fbprophet 모델의 rmse
+rmse_fbprophet_1 = sqrt(mean_squared_error(pred_fbprophet_y_1, test_y))
+
+# arima 모델이 예측한 가격 그래프
+plt.plot(df['ARIMA 예측값'], color ='gold')
+# prophet 모델이 예측한 가격 그래프
+plt.plot(df['FBprophet 예측값'], color ='red')
+# (이상치 처리한)prophet 모델이 예측한  가격 그래프
+plt.plot(df['FBprophet 이상치 제거 후 예측값'], color ='blue')
+#실제 가격 그래프
+plt.plot(df['실제값'], color ='green')
+
+plt.legend(['ARIMA 예측값 \n -RMSE'+ str(round(rmse_arima,0)),
+            'FBprophet 예측값 \n -RMSE'+ str(round(rmse_fbprophet,0)),
+            'FBprophet 이상치 제거 후 예측값 \n -RMSE'+ str(round(rmse_fbprophet_1,0))])
+plt.title("값 비교")
+
+
+from fbprophet.plot import add_changepoints_to_plot
+
+fig3 = prophet.plot(forecast_data)
+a = add_changepoints_to_plot(fig3.gca(), prophet, forecast_data)
+
+
