@@ -1,0 +1,138 @@
+//데이터 로드
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+drive_patch = "/gdrive/My Drive/portfolio/지하철승하차분석/"
+
+sub_month =  pd.read_csv(drive_patch + "CARD_SUBWAY_MONTH_202111.csv",  encoding = 'cp949')  # 월별 역별 평균 승하차 인원
+
+
+!apt-get update -qq
+!apt-get install fonts-nanum* -qq
+
+import matplotlib.font_manager as fm
+
+fm._rebuild()
+
+//데이터 구성
+sub_month.head()
+
+sub_month.info
+
+sub_month.describe()
+
+# 서울 지하철 내 전체 평균 승차승객수 : 10205.961365, std : 9939.814974
+# 서울 지하철 내 전체 평균 하차승객수 : 10172.808545, std : 10136.107050
+# 표준편차 값은 다르다고 쳐도 평균값이 왜 다르지? -> 자료 자체 총 승차인원과 총 하차인원수가 달랐다.
+
+sorted(list(set(sub_month['사용일자'])))
+
+#2021년11월1일부터 11월 29일까지 역별 승하차 정보가 담겨있음을 알 수 있다.
+
+len(sub_month['역명'].unique())
+
+# 고유 역명은 총 521개
+
+
+# 한달 전체 일별로 승하차 정보가 담겨져 있으므로 역명별로 승하차 인원을 평균을 내어 분석하겠다.
+
+# 새로운 데이터를 담기위해 먼저 복사본을 생성해준다
+metro = sub_month.copy()
+metro
+
+
+# 평균낸 값을 metro에 새로운 열로 각각 추가하고 기존 열들은 삭제
+metro['승차평균'] = metro.groupby(['역명'])['승차총승객수'].transform('mean')
+metro['하차평균'] = metro.groupby(['역명'])['하차총승객수'].transform('mean')
+
+metro = metro.drop(columns =['사용일자', '승차총승객수', '하차총승객수', '등록일자'], axis=1)
+
+display(metro[metro.duplicated()])
+
+# 청량리(서울시립대입구)을 기준으로 어떤 식으로 중복이 되어있는지 확인
+
+display(metro[metro['역명']=='청량리(서울시립대입구)'])
+
+
+# 역 이름을 기준으로 통일되어 있는것을 확인했으므로 역 명을 기준으로 중복값을 제거하자
+
+metro = metro.drop_duplicates(['역명'])
+display(metro[metro.duplicated()])
+
+# 중복 데이터 없음 확인
+
+metro.info()
+
+# 승차평균 내림차순으로 승차평균인원 시각화
+metro = metro.sort_values('승차평균', ascending=False)
+
+plt.figure(figsize=(30,10))
+sns.barplot(data = metro, x='역명', y='승차평균')
+
+# 그런데 행이 너무 많아 알아보기 힘들다.
+
+# 상위 50개 승차평균 역명과 승차평균인원을 시각화해보자
+
+metro_head_on = metro.head(50).sort_values(by='승차평균',ascending=False)
+
+plt.figure(figsize=(20,10))
+plt.rc('font', family='NanumGothic')
+plt.xticks(rotation = 90)
+sns.barplot(data=metro_head_on, x='역명', y='승차평균')
+
+# 부천, 부평 등의 역명이 포함된것을 보니 서울 내 역만 들어가 있는 것이 아니라 수도권 노선의 전체 역명이 들어가있었던 모양이다.
+
+
+# 하위 50개 승차평균 역명과 승차평균인원을 시각화해보자
+
+metro_tail_on = metro.tail(50).sort_values(by='승차평균',ascending=False)
+
+plt.figure(figsize=(20,10))
+plt.rc('font', family='NanumGothic')
+plt.xticks(rotation = 90)
+sns.barplot(data=metro_tail_on, x='역명', y='승차평균')
+
+
+# 승차인원 표와 크게 다를것같지 않지만 하차평균인원도 살펴보자
+# 상위 50개 하차평균 역명과 하차평균인원 시각화
+
+metro_head_off = metro.head(50).sort_values(by='하차평균',ascending=False)
+
+plt.figure(figsize=(20,10))
+plt.rc('font', family='NanumGothic')
+plt.xticks(rotation = 90)
+sns.barplot(data=metro_head_off, x='역명', y='하차평균')
+
+
+# 하위 50개 하차평균 역명과 하차평균인원 시각화
+
+metro_tail_off = metro.tail(50).sort_values(by='하차평균',ascending=False)
+
+plt.figure(figsize=(20,10))
+plt.rc('font', family='NanumGothic')
+plt.xticks(rotation = 90)
+sns.barplot(data=metro_tail_off, x='역명', y='하차평균')
+
+
+## 상위 50개
+# 승하차 평균 인원 모두 강남역에서 가장 많은 것으로 나타났다. 그리고 50개 내에는 대체적으로 출퇴근이 많은 역이 많이 분포해있음을 볼 수 있다.
+## 하위 50개
+# 승하차 하위 50개의 그래프를 보았을 때, 도심에서 멀어질수록 낮은 승하차인원 분포가 나타나고 있음을 볼 수 있다.
+
+# 대체적으로 승차/하차 평균 인원은 비슷하지만 조금씩 다른 형태를 보이고 있다. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
